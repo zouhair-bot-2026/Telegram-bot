@@ -1,100 +1,71 @@
+import os
 import telebot
 import yfinance as yf
 import pandas as pd
-import time
-from threading import Thread
 
-TOKEN = "8235557002:AAEI3vbN3UrJ2CrFjGU2R37ErcXEUpQmIBc"
+# توكن البوت من Render
+TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
-CHAT_ID = None
 
-# الازواج مع الرموز الصحيحة متاع yfinance
-PAIRS = {
-    "EUR/USD OTC": "EURUSD=X",
-    "USD/JPY OTC": "JPY=X", 
-    "AUD/USD OTC": "AUDUSD=X",
-    "EUR/AUD OTC": "EURAUD=X",
-    "EUR/JPY OTC": "EURJPY=X", 
-    "EUR/CHF OTC": "EURCHF=X",
-    "GOLD OTC": "GC=F",
-    "SILVER OTC": "SI=F",
-    "CAD/JPY OTC": "CADJPY=X"
-}
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, "تم تشغيل بوت التحليل ✅\nأرسل رمز السهم مثل: AAPL أو TSLA")
 
-def analyze_pair(name, symbol):
+@bot.message_handler(func=lambda message: True)
+def analyze_stock(message):
     try:
-        data = yf.download(symbol, period="30d", interval="4h")
+        ticker = message.text.strip().upper()
+        bot.reply_to(message, f"لحظة نحلل في {ticker}... ⏳")
+        
+        # جلب البيانات
+        stock = yf.Ticker(ticker)
+        data = stock.history(period="6mo")
+        
         if data.empty:
-            return None
-            
-        # RSI 14
+            bot.reply_to(message, "ما لقيتش السهم هذا ❌ تأكد من الرمز")
+            return
+        
+        # حساب RSI
         delta = data['Close'].diff()
         gain = delta.where(delta > 0, 0).rolling(14).mean()
         loss = -delta.where(delta < 0, 0).rolling(14).mean()
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
-        last_rsi = rsi.iloc[-1]
+        last_rsi = round(rsi.iloc[-1], 2)
         
-        # MACD 12-26-9
+        # حساب MACD
         exp1 = data['Close'].ewm(span=12, adjust=False).mean()
         exp2 = data['Close'].ewm(span=26, adjust=False).mean()
         macd = exp1 - exp2
         signal = macd.ewm(span=9, adjust=False).mean()
-        last_macd = macd.iloc[-1]
-        last_signal = signal.iloc[-1]
-        prev_macd = macd.iloc[-2]
-        prev_signal = signal.iloc[-2]
+        last_macd = round(macd.iloc[-1], 2)
+        last_signal = round(signal.iloc[-1], 2)
         
-        # شرط الشراء: RSI <= 30 + تقاطع MACD لفوق
-        if last_rsi <= 30 and prev_macd < prev_signal and last_macd > last_signal:
-            return f"🟢 شراء {name}\nRSI: {last_rsi:.2f} تشبع بيعي\nMACD: تقاطع ايجابي\nفريم: 4H"
+        # السعر الحالي
+        price = round(data['Close'].iloc[-1], 2)
         
-        # شرط البيع: RSI >= 70 + تقاطع MACD لتحت  
-        elif last_rsi >= 70 and prev_macd > prev_signal and last_macd < last_signal:
-            return f"🔴 بيع {name}\nRSI: {last_rsi:.2f} تشبع شرائي\nMACD: تقاطع سلبي\nفريم: 4H"
-            
+        # التوصية
+        if last_rsi < 30 and last_macd > last_signal:
+            recommendation = "فرصة شراء قوية 💚📈"
+        elif last_rsi > 70 and last_macd < last_signal:
+            recommendation = "فرصة بيع / حذر 🔴📉"
+        else:
+            recommendation = "انتظار / حيادي 🟡"
+        
+        # الرد
+        reply = f"""📊 تحليل {ticker}
+السعر الحالي: {price}$
+
+RSI: {last_rsi}
+MACD: {last_macd}
+Signal: {last_signal}
+
+التوصية: {recommendation}
+"""
+        bot.reply_to(message, reply)
+        
     except Exception as e:
-        print(f"Error {name}: {e}")
-    return None
+        bot.reply_to(message, f"صار خطأ: {str(e)}")
 
-def check_all_signals():
-    global CHAT_ID
-    while True:
-        if CHAT_ID:
-            signals = []
-            for name, symbol in PAIRS.items():
-                result = analyze_pair(name, symbol)
-                if result:
-                    signals.append(result)
-                time.sleep(2)
-            
-            if signals:
-                msg = "🔥 اشارات جديدة 🔥\n\n" + "\n\n".join(signals)
-                bot.send_message(CHAT_ID, msg)
-        
-        time.sleep(14400)  # كل 4 ساعات
-
-@bot.message_handler(commands=['start'])
-def start(message):
-    global CHAT_ID
-    CHAT_ID = message.chat.id
-    bot.reply_to(message, "تم تشغيل بوت التحليل ✅\nنراقب 9 ازواج فريم 4H\nRSI 14 + MACD 12-26-9\nباش نبعثلك كي نلقى فرصة")
-
-@bot.message_handler(commands=['check'])
-def manual_check(message):
-    bot.reply_to(message, "جاري الفحص توا...")
-    signals = []
-    for name, symbol in PAIRS.items():
-        result = analyze_pair(name, symbol)
-        if result:
-            signals.append(result)
-        time.sleep(1)
-    
-    if signals:
-        msg = "🔥 اشارات حالية 🔥\n\n" + "\n\n".join(signals)
-        bot.send_message(message.chat.id, msg)
-    else:
-        bot.send_message(message.chat.id, "لا توجد اشارات حاليا على فريم 4H")
-
-Thread(target=check_all_signals).start()
+print("Bot is running...")
 bot.infinity_polling()
