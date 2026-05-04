@@ -1,32 +1,43 @@
-import os
-import logging
+
+import telebot
+from telebot import types
 import threading
 from flask import Flask
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-logging.basicConfig(level=logging.INFO)
+# التوكن متاعك - حطو في Render كـ Environment Variable اسمو TOKEN
+import os
+TOKEN = os.environ.get('TOKEN')
+bot = telebot.TeleBot(TOKEN)
 
-TOKEN = os.environ.get('BOT_TOKEN')
+# Flask باش Render ما يطيحش البوت
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return 'Bot is running!'
+    return "إشارات زهير الذهبية خدام 🔥"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('مرحبا Zouhair! البوت يخدم 🔥')
+# الأزواج اللي طلبتهم
+pairs = [
+    "EUR/USD OTC", "USD/JPY OTC", "USD/CAD", "EUR/AUD OTC", 
+    "AUD/USD OTC", "EUR/JPY OTC", "CHF/JPY OTC", 
+    "EUR/CHF OTC", "GOLD OTC", "SILVER OTC"
+]
 
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(update.message.text)
+# امر /start
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    buttons = [types.KeyboardButton(pair) for pair in pairs]
+    markup.add(*buttons)
+    
+    bot.reply_to(message, 
+        f"مرحبا بك في *إشارات زهير الذهبية* 🌟\n\n"
+        f"اختر الزوج اللي تحب تاخذ عليه إشارة:",
+        parse_mode='Markdown',
+        reply_markup=markup)
 
-def run_bot():
-    application = Application.builder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-    application.run_polling()
-
-if __name__ == "__main__":
-    threading.Thread(target=run_bot).start()
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+# كي تضغط على اي زوج
+@bot.message_handler(func=lambda message: message.text in pairs)
+def send_signal(message):
+    pair = message.text
+    msg = bot.reply_to(message, f"اكتب إ
