@@ -1,65 +1,100 @@
-import os
 import telebot
-from telebot import types
-from flask import Flask
-import threading
+import yfinance as yf
+import pandas as pd
+import time
+from threading import Thread
 
-TOKEN = os.environ.get('TOKEN')
+TOKEN = "8235557002:AAEI3vbN3UrJ2CrFjGU2R37ErcXEUpQmIBc"
 bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
-user_state = {}
+CHAT_ID = None
 
-PAIRS = [
-    'EUR/USD OTC', 'USD/JPY OTC', 'USD/CAD', 'EUR/AUD OTC', 
-    'AUD/USD OTC', 'EUR/JPY OTC', 'CHF/JPY OTC', 'EUR/CHF OTC',
-    'GOLD OTC', 'SILVER OTC'
-]
+# الازواج مع الرموز الصحيحة متاع yfinance
+PAIRS = {
+    "EUR/USD OTC": "EURUSD=X",
+    "USD/JPY OTC": "JPY=X", 
+    "AUD/USD OTC": "AUDUSD=X",
+    "EUR/AUD OTC": "EURAUD=X",
+    "EUR/JPY OTC": "EURJPY=X", 
+    "EUR/CHF OTC": "EURCHF=X",
+    "GOLD OTC": "GC=F",
+    "SILVER OTC": "SI=F",
+    "CAD/JPY OTC": "CADJPY=X"
+}
 
-@app.route('/')
-def home():
-    return "البوت خدام..."
+def analyze_pair(name, symbol):
+    try:
+        data = yf.download(symbol, period="30d", interval="4h")
+        if data.empty:
+            return None
+            
+        # RSI 14
+        delta = data['Close'].diff()
+        gain = delta.where(delta > 0, 0).rolling(14).mean()
+        loss = -delta.where(delta < 0, 0).rolling(14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        last_rsi = rsi.iloc[-1]
+        
+        # MACD 12-26-9
+        exp1 = data['Close'].ewm(span=12, adjust=False).mean()
+        exp2 = data['Close'].ewm(span=26, adjust=False).mean()
+        macd = exp1 - exp2
+        signal = macd.ewm(span=9, adjust=False).mean()
+        last_macd = macd.iloc[-1]
+        last_signal = signal.iloc[-1]
+        prev_macd = macd.iloc[-2]
+        prev_signal = signal.iloc[-2]
+        
+        # شرط الشراء: RSI <= 30 + تقاطع MACD لفوق
+        if last_rsi <= 30 and prev_macd < prev_signal and last_macd > last_signal:
+            return f"🟢 شراء {name}\nRSI: {last_rsi:.2f} تشبع بيعي\nMACD: تقاطع ايجابي\nفريم: 4H"
+        
+        # شرط البيع: RSI >= 70 + تقاطع MACD لتحت  
+        elif last_rsi >= 70 and prev_macd > prev_signal and last_macd < last_signal:
+            return f"🔴 بيع {name}\nRSI: {last_rsi:.2f} تشبع شرائي\nMACD: تقاطع سلبي\nفريم: 4H"
+            
+    except Exception as e:
+        print(f"Error {name}: {e}")
+    return None
+
+def check_all_signals():
+    global CHAT_ID
+    while True:
+        if CHAT_ID:
+            signals = []
+            for name, symbol in PAIRS.items():
+                result = analyze_pair(name, symbol)
+                if result:
+                    signals.append(result)
+                time.sleep(2)
+            
+            if signals:
+                msg = "🔥 اشارات جديدة 🔥\n\n" + "\n\n".join(signals)
+                bot.send_message(CHAT_ID, msg)
+        
+        time.sleep(14400)  # كل 4 ساعات
 
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    buttons = [types.InlineKeyboardButton(pair, callback_data=pair) for pair in PAIRS]
-    markup.add(*buttons)
-    bot.send_message(message.chat.id, "👋 أهلا بيك في بوت إشارات زهير الذهبية 🌟\n\nاختار الزوج:", reply_markup=markup)
+def start(message):
+    global CHAT_ID
+    CHAT_ID = message.chat.id
+    bot.reply_to(message, "تم تشغيل بوت التحليل ✅\nنراقب 9 ازواج فريم 4H\nRSI 14 + MACD 12-26-9\nباش نبعثلك كي نلقى فرصة")
 
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callback(call):
-    pair = call.data
-    user_state[call.from_user.id] = pair
-    msg = bot.send_message(call.message.chat.id, f"📊 اخترت: {pair}\n\nاكتبلي الإشارة توا:\nمثال: 14:30 شراء 3 دقايق")
-    bot.register_next_step_handler(msg, process_signal)
+@bot.message_handler(commands=['check'])
+def manual_check(message):
+    bot.reply_to(message, "جاري الفحص توا...")
+    signals = []
+    for name, symbol in PAIRS.items():
+        result = analyze_pair(name, symbol)
+        if result:
+            signals.append(result)
+        time.sleep(1)
+    
+    if signals:
+        msg = "🔥 اشارات حالية 🔥\n\n" + "\n\n".join(signals)
+        bot.send_message(message.chat.id, msg)
+    else:
+        bot.send_message(message.chat.id, "لا توجد اشارات حاليا على فريم 4H")
 
-def process_signal(message):
-    try:
-        pair = user_state.get(message.from_user.id, "زوج")
-        signal_text = message.text
-        
-        formatted_signal = f"""🌟 إشارات زهير الذهبية 🌟
-
-📊 الزوج: {pair}
-⏰ الإشارة: {signal_text}
-
-✅ بالتوفيق للجميع"""
-        
-        bot.send_message(message.chat.id, formatted_signal)
-        
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        buttons = [types.InlineKeyboardButton(p, callback_data=p) for p in PAIRS]
-        markup.add(*buttons)
-        bot.send_message(message.chat.id, "تحب تبعث إشارة أخرى؟ اختار زوج:", reply_markup=markup)
-        
-    except Exception as e:
-        bot.send_message(message.chat.id, f"صار Error: {e}")
-
-def run_bot():
-    print("البوت خدام...")
-    bot.infinity_polling()
-
-if __name__ == "__main__":
-    threading.Thread(target=run_bot).start()
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+Thread(target=check_all_signals).start()
+bot.infinity_polling()
