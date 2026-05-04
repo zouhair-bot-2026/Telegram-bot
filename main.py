@@ -1,7 +1,10 @@
-import os
 import telebot
 import yfinance as yf
 import pandas as pd
+import ta
+import threading
+from flask import Flask
+import os
 
 # توكن البوت من Render
 TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -67,5 +70,21 @@ Signal: {last_signal}
     except Exception as e:
         bot.reply_to(message, f"صار خطأ: {str(e)}")
 
-print("Bot is running...")
-bot.infinity_polling()
+def run_bot():
+    print("Bot is running...")
+    bot.infinity_polling()
+
+if __name__ == '__main__':
+    # نشغلو البوت في thread وحدو
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.start()
+    
+    # سيرفر وهمي باش ريندر ما يعملش timeout
+    app = Flask(__name__)
+    
+    @app.route('/')
+    def home():
+        return "Zouhair Bot is alive!"
+    
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
