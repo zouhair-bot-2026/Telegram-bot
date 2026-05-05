@@ -6,6 +6,8 @@ import yfinance as yf
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
+import time
+import sys
 
 app = Flask('')
 @app.route('/')
@@ -91,5 +93,8 @@ scheduler = BackgroundScheduler(timezone=tunis_tz)
 scheduler.add_job(check_signals, 'cron', hour='1,5,9,13,17,21', minute=1)
 scheduler.start()
 
-print("Bot V2 is running and scheduler started...")
-bot.infinity_polling()
+   bot.remove_webhook()
+   time.sleep(1)
+   print("Bot V2 is running and scheduler started...")
+   sys.stdout.flush()
+   bot.infinity_polling(skip_pending=True)
