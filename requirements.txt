@@ -1,4 +1,5 @@
 pyTelegramBotAPI
 yfinance
 pandas
-apscheduler
+APScheduler
+flask
