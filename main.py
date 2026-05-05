@@ -1,90 +1,79 @@
 import telebot
 import yfinance as yf
 import pandas as pd
-import ta
-import threading
-from flask import Flask
+from apscheduler.schedulers.background import BackgroundScheduler
 import os
 
-# توكن البوت من Render
-TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+TOKEN = os.environ.get('TOKEN')
+CHAT_ID = '8513844345' 
+
 bot = telebot.TeleBot(TOKEN)
 
+PAIRS = ['EURUSD=X', 'USDJPY=X', 'USDCAD=X', 'EURAUD=X', 'EURJPY=X', 'XAUUSD=X']
+
+def calculate_indicators(data):
+    # RSI
+    delta = data['Close'].diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(14).mean()
+    rs = gain / loss
+    data['RSI'] = 100 - (100 / (1 + rs))
+    
+    # MACD
+    exp1 = data['Close'].ewm(span=12, adjust=False).mean()
+    exp2 = data['Close'].ewm(span=26, adjust=False).mean()
+    data['MACD'] = exp1 - exp2
+    data['Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
+    
+    # EMA200 فلتر الترند
+    data['EMA200'] = data['Close'].ewm(span=200, adjust=False).mean()
+    return data
+
+def check_signals():
+    for pair in PAIRS:
+        try:
+            data = yf.download(tickers=pair, period='30d', interval='4h', progress=False)
+            if len(data) < 200: continue # لازم داتا كافية للـ EMA200
+            
+            data = calculate_indicators(data)
+            
+            last = data.iloc[-1]
+            prev = data.iloc[-2]
+            
+            name = pair.replace('USDJPY=X', 'USD/JPY').replace('EURUSD=X', 'EUR/USD').replace('USDCAD=X', 'USD/CAD').replace('EURAUD=X', 'EUR/AUD').replace('EURJPY=X', 'EUR/JPY').replace('XAUUSD=X', 'GOLD')
+            
+            signal = None
+            
+            # شرط الشراء: RSI < 30 + تقاطع MACD لفوق + السعر فوق EMA200
+            buy_condition = (last['RSI'] < 30 and 
+                             prev['MACD'] < prev['Signal'] and 
+                             last['MACD'] > last['Signal'] and 
+                             last['Close'] > last['EMA200'])
+            
+            # شرط البيع: RSI > 70 + تقاطع MACD لتحت + السعر تحت EMA200  
+            sell_condition = (last['RSI'] > 70 and 
+                              prev['MACD'] > prev['Signal'] and 
+                              last['MACD'] < last['Signal'] and 
+                              last['Close'] < last['EMA200'])
+            
+            if buy_condition:
+                signal = f"✅ شراء قوي {name}\nالسعر: {last['Close']:.5f}\nRSI: {last['RSI']:.2f} | MACD تقاطع صعودي\nفلتر: فوق EMA200"
+            elif sell_condition:
+                signal = f"❌ بيع قوي {name}\nالسعر: {last['Close']:.5f}\nRSI: {last['RSI']:.2f} | MACD تقاطع هبوطي\nفلتر: تحت EMA200"
+            
+            if signal:
+                bot.send_message(CHAT_ID, f"🚨 إشارة 4H مفلترة\n{signal}")
+                
+        except Exception as e:
+            print(f"Error with {pair}: {e}")
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(check_signals, 'interval', hours=4)
+scheduler.start()
+
 @bot.message_handler(commands=['start'])
-def start(message):
-    bot.reply_to(message, "تم تشغيل بوت التحليل ✅\nأرسل رمز السهم مثل: AAPL أو TSLA")
+def send_welcome(message):
+    bot.reply_to(message, f"بوت إشارات 4H V2 خدام 🔥\nالفلاتر: RSI + MACD + EMA200\nنراقب في: EUR/USD, USD/JPY, USD/CAD, EUR/AUD, EUR/JPY, GOLD")
 
-@bot.message_handler(func=lambda message: True)
-def analyze_stock(message):
-    try:
-        ticker = message.text.strip().upper()
-        bot.reply_to(message, f"لحظة نحلل في {ticker}... ⏳")
-        
-        # جلب البيانات
-        stock = yf.Ticker(ticker)
-        data = stock.history(period="6mo")
-        
-        if data.empty:
-            bot.reply_to(message, "ما لقيتش السهم هذا ❌ تأكد من الرمز")
-            return
-        
-        # حساب RSI
-        delta = data['Close'].diff()
-        gain = delta.where(delta > 0, 0).rolling(14).mean()
-        loss = -delta.where(delta < 0, 0).rolling(14).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        last_rsi = round(rsi.iloc[-1], 2)
-        
-        # حساب MACD
-        exp1 = data['Close'].ewm(span=12, adjust=False).mean()
-        exp2 = data['Close'].ewm(span=26, adjust=False).mean()
-        macd = exp1 - exp2
-        signal = macd.ewm(span=9, adjust=False).mean()
-        last_macd = round(macd.iloc[-1], 2)
-        last_signal = round(signal.iloc[-1], 2)
-        
-        # السعر الحالي
-        price = round(data['Close'].iloc[-1], 2)
-        
-        # التوصية
-        if last_rsi < 30 and last_macd > last_signal:
-            recommendation = "فرصة شراء قوية 💚📈"
-        elif last_rsi > 70 and last_macd < last_signal:
-            recommendation = "فرصة بيع / حذر 🔴📉"
-        else:
-            recommendation = "انتظار / حيادي 🟡"
-        
-        # الرد
-        reply = f"""📊 تحليل {ticker}
-السعر الحالي: {price}$
-
-RSI: {last_rsi}
-MACD: {last_macd}
-Signal: {last_signal}
-
-التوصية: {recommendation}
-"""
-        bot.reply_to(message, reply)
-        
-    except Exception as e:
-        bot.reply_to(message, f"صار خطأ: {str(e)}")
-
-def run_bot():
-    print("Bot is running...")
-    bot.infinity_polling()
-
-if __name__ == '__main__':
-    # نشغلو البوت في thread وحدو
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.start()
-    
-    # سيرفر وهمي باش ريندر ما يعملش timeout
-    app = Flask(__name__)
-    
-    @app.route('/')
-    def home():
-        return "Zouhair Bot is alive!"
-    
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+print("Bot V2 is running...")
+bot.infinity_polling()
