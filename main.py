@@ -1,8 +1,18 @@
+import os
+from threading import Thread
+from flask import Flask
+
+app = Flask('')
+@app.route('/')
+def home(): return "Bot is alive!"
+Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))).start()
+
+# الكود متاعك القديم يبدا من هنا لتحت 👇
+# ما تمس منو شي
 import telebot
 import yfinance as yf
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
-import os
 
 TOKEN = os.environ.get('TOKEN')
 CHAT_ID = '8513844345' 
