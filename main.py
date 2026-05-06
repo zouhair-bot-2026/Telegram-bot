@@ -1,6 +1,6 @@
-import os
-from threading import Thread
 from flask import Flask
+from threading import Thread
+import os
 import telebot
 import yfinance as yf
 import pandas as pd
@@ -10,10 +10,28 @@ import time
 import sys
 
 app = Flask('')
+
 @app.route('/')
 def home():
     return "Bot is alive!"
-Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))).start()
+
+def run():
+  app.run(host='0.0.0.0', port=10000)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+TOKEN = os.environ.get('TOKEN')
+CHAT_ID = '8513844345'
+
+# الكود متاع البوت متاعك هنا...
+bot = telebot.TeleBot(TOKEN)
+
+# ... كل الاوامر متاعك ...
+
+keep_alive() # لازم قبل bot.polling()
+bot.polling() # هذا آخر سطر
 
 TOKEN = os.environ.get('TOKEN')
 CHAT_ID = '8513844345'
@@ -97,4 +115,5 @@ bot.remove_webhook()
 time.sleep(1)
 print("Bot V2 is running and scheduler started...")
 sys.stdout.flush()
+keep_alive() # ← زيد هذا السطر الجديد
 bot.infinity_polling(skip_pending=True)
