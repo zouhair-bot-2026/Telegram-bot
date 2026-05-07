@@ -108,16 +108,24 @@ def send_welcome(message):
     bot.reply_to(message, f"بوت إشارات 1H V3 خدام 🔥\nالفلاتر: RSI + MACD\nالمدة: 20 دقيقة\nنراقب في: 10 أزواج منهم الذهب")
 
 # نظفتلك الكود من التكرار اللي كان فيه
-tunis_tz = pytz.timezone('Africa/Tunis')
-scheduler = BackgroundScheduler(timezone=tunis_tz)
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
 
-# 6. بدلنا التوقيت: كل ساعة يخدم بعد تسكيرة الشمعة بدقيقة
-scheduler.add_job(check_signals, 'cron', minute=1) 
-scheduler.start()
+def start_bot():
+    tunis_tz = pytz.timezone('Africa/Tunis')
+    scheduler = BackgroundScheduler(timezone=tunis_tz)
+    scheduler.add_job(check_signals, 'cron', minute=1)
+    scheduler.start()
+    
+    bot.delete_webhook(drop_pending_updates=True)
+    time.sleep(1)
+    
+    print("Bot V3 is running and scheduler started...")
+    sys.stdout.flush()
+    
+    keep_alive()
+    bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
 
-bot.remove_webhook()
-time.sleep(1)
-print("Bot V3 is running and scheduler started...")
-sys.stdout.flush()
-keep_alive()
-bot.infinity_polling(skip_pending=True)
+if __name__ == "__main__":
+    start_bot()
