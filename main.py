@@ -106,10 +106,6 @@ def check_signals():
 def send_welcome(message):
     bot.reply_to(message, f"بوت إشارات 1H V3 خدام 🔥\nالفلاتر: RSI + MACD\nالمدة: 20 دقيقة\nنراقب في: 10 أزواج منهم الذهب")
 
-# نظفتلك الكود من التكرار اللي كان فيه
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
 
 def start_bot():
     tunis_tz = pytz.timezone('Africa/Tunis')
