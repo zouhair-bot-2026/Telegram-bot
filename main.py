@@ -207,7 +207,7 @@ async def daily_summary(context: ContextTypes.DEFAULT_TYPE):
     summary += "غدوة يوم جديد و فرص جديدة 💪"
     await context.bot.send_message(chat_id=CHAT_ID, text=summary)
 
-application = Application.builder().token(BOT_TOKEN).build()
+application = Application.builder().token(TELEGRAM_TOKEN).build()
 
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("help", help_command))
