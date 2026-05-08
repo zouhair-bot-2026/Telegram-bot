@@ -11,7 +11,7 @@ from datetime import datetime, time as dt_time
 from flask import Flask
 from threading import Thread
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 # TUNISIA_TZ = pytz.timezone('Africa/Tunis')
 
