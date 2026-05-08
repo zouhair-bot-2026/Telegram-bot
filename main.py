@@ -211,14 +211,13 @@ async def run_bot():
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("test", test_command))
-
+    application.add_handler(CommandHandler("help", help_command))
+    
     job_queue = application.job_queue
-    job_queue.run_repeating(send_signals, interval=3600, first=10)
-    job_queue.run_daily(daily_summary, time=dt_time(hour=22, minute=0, tzinfo=TUNISIA_TZ))
-
+    job_queue.run_repeating(send_signals, interval=1800, first=10)
+    job_queue.run_daily(daily_summary, time=datetime.time(hour=20, minute=0))
+    
     print("Bot started successfully...")
-    await application.run_polling()
 
 if __name__ == '__main__':
     # ---- Dummy web server for Render ----
@@ -238,4 +237,4 @@ if __name__ == '__main__':
     threading.Thread(target=run_server, daemon=True).start()
     # ---- End dummy server ----
     
-    asyncio.run(run_bot())
+    application.run_polling()
