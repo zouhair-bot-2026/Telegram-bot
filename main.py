@@ -1,15 +1,15 @@
-1  import os
-2  import time
-3  import asyncio
-4  # import yfinance as yf
-5  # import pandas as pd
-6  # import numpy as np
-7  from telegram import Update
-8  from telegram.ext import Application, ...
-9  from datetime import datetime, time as dt_time
-10 # import pytz
-11 from flask import Flask
-12 from threading import Thread
+import os
+import time
+import asyncio
+# import yfinance as yf
+# import pandas as pd
+# import numpy as np
+from telegram import Update
+from telegram.ext import Application, ...
+from datetime import datetime, time as dt_time
+# import pytz
+from flask import Flask
+from threading import Thread
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
