@@ -222,20 +222,20 @@ async def run_bot():
 
 if __name__ == '__main__':
     # ---- Dummy web server for Render ----
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'Bot is running')
-
-def run_server():
-    server = HTTPServer(('0.0.0.0', 10000), Handler)
-    server.serve_forever()
-
-threading.Thread(target=run_server, daemon=True).start()
-# ---- End dummy server ----
-
-asyncio.run(run_bot())
+    import threading
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'Bot is running')
+    
+    def run_server():
+        server = HTTPServer(('0.0.0.0', 10000), Handler)
+        server.serve_forever()
+    
+    threading.Thread(target=run_server, daemon=True).start()
+    # ---- End dummy server ----
+    
+    asyncio.run(run_bot())
