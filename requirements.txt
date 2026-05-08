@@ -1,6 +1,6 @@
 pyTelegramBotAPI
-yfinance  
+yfinance
 pandas
-APScheduler
 pytz
 Flask
+schedule==1.2.1
