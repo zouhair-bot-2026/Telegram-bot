@@ -36,7 +36,8 @@ def home():
     return "بوت الفوركس شغال ✅"
 
 def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get('PORT', 8080))  # ← هذا السطر تبدل
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run_flask)
