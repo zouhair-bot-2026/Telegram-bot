@@ -207,17 +207,16 @@ async def daily_summary(context: ContextTypes.DEFAULT_TYPE):
     summary += "غدوة يوم جديد و فرص جديدة 💪"
     await context.bot.send_message(chat_id=CHAT_ID, text=summary)
 
-async def run_bot():
-    application = Application.builder().token(TOKEN).build()
+application = Application.builder().token(BOT_TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    
-    job_queue = application.job_queue
-    job_queue.run_repeating(send_signals, interval=1800, first=10)
-    job_queue.run_daily(daily_summary, time=datetime.time(hour=20, minute=0))
-    
-    print("Bot started successfully...")
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("help", help_command))
+
+job_queue = application.job_queue
+job_queue.run_repeating(send_signals, interval=1800, first=10)
+job_queue.run_daily(daily_summary, time=datetime.time(hour=20, minute=0))
+
+print("Bot started successfully...")
 
 if __name__ == '__main__':
     # ---- Dummy web server for Render ----
