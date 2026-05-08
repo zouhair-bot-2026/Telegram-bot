@@ -4,11 +4,11 @@ import os
 import telebot
 import yfinance as yf
 import pandas as pd
-from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
 import time
 import sys
 from datetime import datetime
+import schedule
 
 app = Flask('')
 
@@ -35,17 +35,15 @@ PAIRS = [
 def check_signals():
     print("🔍 Starting 1H scan...")
     signals_sent = 0
-    
     for pair in PAIRS:
         try:
             name = pair.replace('=X', '').replace('XAUUSD', 'GOLD')
             print(f"Checking {name} 1H...")
-            
             data = yf.download(tickers=pair, period="20d", interval="1h", progress=False, threads=False)
             
             if data.empty or len(data) < 50:
                 print(f"❌ Not enough data for {name}")
-                time.sleep(3)  # مهم حتى كان فشل
+                time.sleep(3)
                 continue
 
             # RSI
@@ -94,7 +92,6 @@ def check_signals():
                 bot.send_message(CHAT_ID, msg)
                 print(f"✅ SIGNAL SENT: BUY {name}")
                 signals_sent += 1
-                
             elif sell_condition:
                 sl = round(price + sl_distance, 5)
                 tp = round(price - sl_distance * 2, 5)
@@ -108,9 +105,8 @@ def check_signals():
         except Exception as e:
             print(f"❌ Error with {pair}: {e}")
         
-        # هذا السطر هو Fix الـ Rate Limit
         print("⏳ استراحة 3 ثواني...")
-        time.sleep(3) 
+        time.sleep(3)
     
     if signals_sent == 0:
         print("✅ انتهى الفحص - لا توجد إشارات")
@@ -118,7 +114,6 @@ def check_signals():
         print(f"✅ انتهى الفحص - تم إرسال {signals_sent} إشارة")
 
 # ========== الأوامر الجديدة ==========
-
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     bot.reply_to(message, f"بوت إشارات 1H V3 خدام 🔥\nالفلاتر: RSI + MACD\nالمدة: 20 دقيقة\nنراقب في: {len(PAIRS)} أزواج\n\n/status = حالة البوت\n/test = فحص فوري")
@@ -127,31 +122,23 @@ def send_welcome(message):
 def cmd_status(message):
     pairs_txt = '\n'.join([f"• {p.replace('=X','').replace('XAUUSD','GOLD')}" for p in PAIRS])
     now = datetime.now(pytz.timezone('Africa/Tunis')).strftime('%H:%M:%S %d/%m')
-    msg = f"""
-🟢 **البوت V3 شغال**
-
+    msg = f"""🟢 **البوت V3 شغال**
 **الوقت:** {now}
 **الفحص الآلي:** كل ساعة دقيقة 01
 **عدد الأزواج:** {len(PAIRS)}
 **الاستراتيجية:** RSI + MACD
-
 **الأزواج:**
 {pairs_txt}
-
-**الحماية:**
-✅ UptimeRobot كل 5 دقائق
+**الحماية:** ✅ UptimeRobot كل 5 دقائق
 ✅ Anti Rate-Limit: 3ث بين الأزواج
-
-جرب /test للفحص اللحظي
-"""
+جرب /test للفحص اللحظي"""
     bot.reply_to(message, msg)
 
 @bot.message_handler(commands=['test'])
 def cmd_test(message):
     bot.reply_to(message, "⏳ فحص لحظي لـ3 أزواج... استنى 15 ثانية")
     results = []
-    
-    for symbol in PAIRS[:3]:  # 3 أزواج فقط
+    for symbol in PAIRS[:3]:
         name = symbol.replace('=X', '').replace('XAUUSD', 'GOLD')
         try:
             df = yf.download(symbol, period="2d", interval="1h", progress=False, threads=False)
@@ -165,28 +152,29 @@ def cmd_test(message):
                 loss = -delta.clip(upper=0).rolling(14).mean()
                 rs = gain / loss
                 rsi = round((100 - (100 / (1 + rs))).iloc[-1], 1)
-                
                 # MACD
                 ema12 = close.ewm(span=12).mean()
                 ema26 = close.ewm(span=26).mean()
                 macd = ema12 - ema26
                 signal = macd.ewm(span=9).mean()
                 macd_dir = "صاعد ↑" if macd.iloc[-1] > signal.iloc[-1] else "هابط ↓"
-                
-                results.append(f"📊 {name}\n   RSI: {rsi} | MACD: {macd_dir}")
-            
-            time.sleep(3)  # مهم ضد Rate Limit
+                results.append(f"📊 {name}\n RSI: {rsi} | MACD: {macd_dir}")
+            time.sleep(3)
         except Exception as e:
             results.append(f"❌ {name}: Error")
-    
     bot.reply_to(message, "🔍 **نتيجة الفحص الفوري:**\n\n" + "\n\n".join(results) + "\n\n_الإشارة تجي كان RSI + MACD تحققو_")
 
-def start_bot():
-    tunis_tz = pytz.timezone('Africa/Tunis')
-    scheduler = BackgroundScheduler(timezone=tunis_tz)
+def run_schedule():
     # يخدم كل ساعة في الدقيقة 01
-    scheduler.add_job(check_signals, 'cron', minute=1)
-    scheduler.start()
+    schedule.every().hour.at(":01").do(check_signals)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+def start_bot():
+    # شغل الـScheduler في thread منفصل
+    scheduler_thread = Thread(target=run_schedule, daemon=True)
+    scheduler_thread.start()
     
     bot.delete_webhook(drop_pending_updates=True)
     time.sleep(1)
