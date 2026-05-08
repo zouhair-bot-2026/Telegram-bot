@@ -1,19 +1,15 @@
 import os
 import time
 import asyncio
-# import yfinance as yf
-# import pandas as pd
-# import numpy as np
+import yfinance as yf
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from datetime import datetime, time as dt_time
-# import pytz
 from flask import Flask
 from threading import Thread
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-# TUNISIA_TZ = pytz.timezone('Africa/Tunis')
 
 PAIRS = {
     "EURUSD": "EURUSD=X",
@@ -28,212 +24,182 @@ PAIRS = {
     "EURJPY": "EURJPY=X"
 }
 
-# Flask باش Render ما يقتلش البوت
-app = Flask('')
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "بوت الفوركس شغال ✅"
+    return "بوت الفوركس شغال 24/7 ✅"
 
 def run_flask():
-    port = int(os.environ.get('PORT', 8080))  # ← هذا السطر تبدل
+    port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
 
-def keep_alive():
-    t = Thread(target=run_flask)
-    t.start()
-
-def calculate_rsi(prices, period=14):
-    delta = prices.diff()
+def calculate_rsi(data, period=14):
+    delta = data.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
-    return 100 - (100 / (1 + rs))
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
 
-def calculate_sma(data, window):
-    return data.rolling(window=window).mean()
+def calculate_sma(data, period):
+    return data.rolling(window=period).mean()
 
-def calculate_ema(data, window):
-    return data.ewm(span=window, adjust=False).mean()
+def calculate_ema(data, period):
+    return data.ewm(span=period, adjust=False).mean()
 
-def get_trend(df):
-    if len(df) < 50:
-        return "غير محدد"
-    sma20 = df['SMA20'].iloc[-1]
-    sma50 = df['SMA50'].iloc[-1]
-    close = df['Close'].iloc[-1]
-    
-    if close > sma20 > sma50:
+def get_trend(ema9, ema21):
+    if ema9 > ema21:
         return "صاعد 📈"
-    elif close < sma20 < sma50:
+    elif ema9 < ema21:
         return "هابط 📉"
     else:
-        return "عرضي ↔️"
+        return "عرضي ➡️"
 
-def analyze_pair(pair):
+def get_support_resistance(data):
     try:
-        symbol = PAIRS
-        df = yf.download(symbol, period="5d", interval="1h", progress=False, threads=False)
-        time.sleep(1)
+        recent_high = data['High'].tail(50).max()
+        recent_low = data['Low'].tail(50).min()
+        return recent_high, recent_low
+    except:
+        return None, None
 
-        if df.empty or len(df) < 50:
+def analyze_pair(pair_name):
+    try:
+        symbol = PAIRS[pair_name]
+        data = yf.download(symbol, period="5d", interval="15m", progress=False)
+        
+        if len(data) < 200:
+            print(f"{pair_name}: داتا ناقصة")
             return None
-
-        df['RSI'] = calculate_rsi(df['Close'])
-        df['SMA20'] = calculate_sma(df['Close'], 20)
-        df['SMA50'] = calculate_sma(df['Close'], 50)
-        df['EMA9'] = calculate_ema(df['Close'], 9)
-
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-
+            
+        close = data['Close']
+        high = data['High']
+        low = data['Low']
+        
+        sma200 = calculate_sma(close, 200).iloc[-1]
+        ema9 = calculate_ema(close, 9).iloc[-1]
+        ema21 = calculate_ema(close, 21).iloc[-1]
+        rsi = calculate_rsi(close, 14).iloc[-1]
+        
+        current_price = close.iloc[-1]
+        prev_price = close.iloc[-2]
+        trend = get_trend(ema9, ema21)
+        resistance, support = get_support_resistance(data)
+        
         signal = None
         reason = ""
-        confidence = ""
-
-        # شروط الشراء القوية
-        if (last['RSI'] < 30 and
-            last['Close'] > last['SMA20'] and
-            prev['Close'] <= prev['SMA20'] and
-            last['Close'] > last['EMA9']):
-            signal = "شراء قوي 🟢🟢"
-            reason = "RSI تشبع بيعي + اختراق SMA20 + فوق EMA9"
-            confidence = "85%"
-
-        # شروط الشراء العادية
-        elif (last['RSI'] < 35 and
-              last['Close'] > last['SMA20'] and
-              prev['Close'] <= prev['SMA20']):
-            signal = "شراء 🟢"
-            reason = "RSI قريب تشبع + اختراق SMA20"
-            confidence = "70%"
-
-        # شروط البيع القوية
-        elif (last['RSI'] > 70 and
-              last['Close'] < last['SMA20'] and
-              prev['Close'] >= prev['SMA20'] and
-              last['Close'] < last['EMA9']):
-            signal = "بيع قوي 🔴🔴"
-            reason = "RSI تشبع شرائي + كسر SMA20 + تحت EMA9"
-            confidence = "85%"
-
-        # شروط البيع العادية
-        elif (last['RSI'] > 65 and
-              last['Close'] < last['SMA20'] and
-              prev['Close'] >= prev['SMA20']):
-            signal = "بيع 🔴"
-            reason = "RSI قريب تشبع + كسر SMA20"
-            confidence = "70%"
-
+        
+        if (current_price < sma200 and 
+            ema9 < ema21 and 
+            rsi > 50 and rsi < 70 and
+            current_price < prev_price):
+            signal = "🔴 إشارة بيع"
+            reason = "السعر تحت SMA200 + ترند هابط + RSI مناسب"
+            
+        elif (current_price > sma200 and 
+              ema9 > ema21 and 
+              rsi < 50 and rsi > 30 and
+              current_price > prev_price):
+            signal = "🟢 إشارة شراء"
+            reason = "السعر فوق SMA200 + ترند صاعد + RSI مناسب"
+        
         if signal:
-            trend = get_trend(df)
-            now_tunis = datetime.now(TUNISIA_TZ).strftime("%H:%M")
-            msg = f"🚨 إشارة {signal}\n\n"
-            msg += f"الزوج: {pair}\n"
-            msg += f"السعر: {last['Close']:.5f}\n"
-            msg += f"RSI: {last['RSI']:.1f}\n"
-            msg += f"SMA20: {last['SMA20']:.5f}\n"
-            msg += f"الاتجاه: {trend}\n"
-            msg += f"السبب: {reason}\n"
-            msg += f"الثقة: {confidence}\n"
-            msg += f"الوقت: {now_tunis} 🇹🇳"
+            msg = f"{signal} {pair_name}\n\n"
+            msg += f"💰 السعر الحالي: {current_price:.5f}\n"
+            msg += f"📊 الترند: {trend}\n"
+            msg += f"📈 RSI: {rsi:.2f}\n"
+            msg += f"📉 SMA200: {sma200:.5f}\n"
+            msg += f"⚡ EMA9: {ema9:.5f}\n"
+            msg += f"⚡ EMA21: {ema21:.5f}\n"
+            if support and resistance:
+                msg += f"🛡️ الدعم: {support:.5f}\n"
+                msg += f"🚧 المقاومة: {resistance:.5f}\n"
+            msg += f"\n💡 السبب: {reason}\n"
+            msg += f"⏰ {datetime.now().strftime('%H:%M %d/%m/%Y')}"
             return msg
         return None
-
+        
     except Exception as e:
-        print(f"Error analyzing {pair}: {e}")
+        print(f"Error analyzing {pair_name}: {e}")
         return None
 
 async def send_signals(context: ContextTypes.DEFAULT_TYPE):
-    print(f"Checking signals... {datetime.now(TUNISIA_TZ)}")
+    print(f"🔍 جاري فحص الإشارات... {datetime.now()}")
     signals_found = 0
+    
     for pair in PAIRS.keys():
         try:
             msg = analyze_pair(pair)
             if msg:
                 await context.bot.send_message(chat_id=CHAT_ID, text=msg)
                 signals_found += 1
-                await asyncio.sleep(5)
+                print(f"✅ تم إرسال إشارة {pair}")
+            await asyncio.sleep(5)
         except Exception as e:
-            print(f"Error sending {pair}: {e}")
+            print(f"❌ خطأ في إرسال {pair}: {e}")
     
     if signals_found == 0:
-        print("No signals this hour")
+        print("📭 لا توجد إشارات هذه الساعة")
+    else:
+        print(f"📤 تم إرسال {signals_found} إشارات")
 
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 فحص لحظي لـ3 أزواج... استنى 15 ثانية ⏳")
-    test_pairs = ["EURUSD", "EURCHF", "AUDUSD"]
-    results = []
+    await update.message.reply_text("🔍 جاري الفحص الفوري لكل الأزواج...")
+    signals_found = 0
     
-    for pair in test_pairs:
+    for pair in PAIRS.keys():
         try:
-            result = analyze_pair(pair)
-            if result:
-                results.append(result)
-            else:
-                symbol = PAIRS
-                df = yf.download(symbol, period="2d", interval="1h", progress=False, threads=False)
-                time.sleep(1)
-                if not df.empty and len(df) > 14:
-                    df['RSI'] = calculate_rsi(df['Close'])
-                    rsi = df['RSI'].iloc[-1]
-                    close = df['Close'].iloc[-1]
-                    results.append(f"⚪ {pair}\nالسعر: {close:.5f}\nRSI: {rsi:.1f} - لا توجد إشارة حاليا")
-                else:
-                    results.append(f"❌ {pair}: مافماش داتا كافية")
+            msg = analyze_pair(pair)
+            if msg:
+                await update.message.reply_text(msg)
+                signals_found += 1
+            await asyncio.sleep(2)
         except Exception as e:
-            results.append(f"❌ {pair}: Error {str(e)[:30]}")
-        await asyncio.sleep(5)
-
-    final_msg = "📊 نتيجة الفحص الفوري:\n\n" + "\n\n".join(results)
-    await update.message.reply_text(final_msg)
+            print(f"Error in test {pair}: {e}")
+    
+    if signals_found == 0:
+        await update.message.reply_text("❌ لا توجد إشارات حاليا حسب الاستراتيجية\n\nالاستراتيجية تتطلب:\n1- شراء: فوق SMA200 + ترند صاعد + RSI 30-50\n2- بيع: تحت SMA200 + ترند هابط + RSI 50-70")
+    else:
+        await update.message.reply_text(f"✅ انتهى الفحص\n📊 عدد الإشارات: {signals_found}")
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_msg = "🤖 بوت الفوركس شغال 24/7 ✅\n\n"
-    welcome_msg += "📈 الأزواج: 10\n"
-    welcome_msg += "⏰ الإشارات: كل ساعة\n"
-    welcome_msg += "📊 الملخص اليومي: 22:00 🇹🇳\n\n"
-    welcome_msg += "الأوامر:\n"
-    welcome_msg += "/test - فحص فوري\n"
-    welcome_msg += "/start - هذه الرسالة"
+    welcome_msg = "🤖 أهلا بيك في بوت إشارات الفوركس\n\n"
+    welcome_msg += "✅ البوت شغال 24/7 على السيرفر\n"
+    welcome_msg += "📈 يراقب 10 أزواج رئيسية:\n"
+    welcome_msg += "EURUSD, GBPUSD, USDJPY, EURCHF, AUDUSD\n"
+    welcome_msg += "USDCAD, NZDUSD, EURGBP, USDCHF, EURJPY\n\n"
+    welcome_msg += "⏰ يفحص الإشارات كل 30 دقيقة\n"
+    welcome_msg += "📊 ملخص يومي الساعة 22:00 بتوقيت تونس\n\n"
+    welcome_msg += "🎯 الأوامر المتاحة:\n"
+    welcome_msg += "/test - فحص فوري لكل الأزواج\n"
+    welcome_msg += "/start - عرض هذه الرسالة\n\n"
+    welcome_msg += "بالتوفيق 💚"
     await update.message.reply_text(welcome_msg)
 
 async def daily_summary(context: ContextTypes.DEFAULT_TYPE):
-    now_tunis = datetime.now(TUNISIA_TZ).strftime("%Y-%m-%d")
-    summary = f"📊 ملخص يومي {now_tunis} 🇹🇳\n\n"
-    summary += "✅ البوت شغال طبيعي\n"
-    summary += "📈 يراقب 10 أزواج\n"
-    summary += "⏰ فحص كل ساعة\n\n"
+    summary = f"📊 الملخص اليومي {datetime.now().strftime('%d/%m/%Y')}\n\n"
+    summary += "✅ البوت اشتغل 24 ساعة بدون توقف\n"
+    summary += "📈 يراقب 10 أزواج فوركس\n"
+    summary += "⏰ فحص الإشارات كل 30 دقيقة\n"
+    summary += "🔍 استراتيجية: SMA200 + EMA9/21 + RSI\n\n"
+    summary += "💡 نصيحة: إدارة رأس المال أهم من الإشارة\n"
     summary += "غدوة يوم جديد و فرص جديدة 💪"
     await context.bot.send_message(chat_id=CHAT_ID, text=summary)
 
-application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("help", help_command))
-
-job_queue = application.job_queue
-job_queue.run_repeating(send_signals, interval=1800, first=10)
-job_queue.run_daily(daily_summary, time=datetime.time(hour=20, minute=0))
-
-print("Bot started successfully...")
+def main():
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("test", test_command))
+    
+    job_queue = application.job_queue
+    job_queue.run_repeating(send_signals, interval=1800, first=10)
+    job_queue.run_daily(daily_summary, time=dt_time(hour=20, minute=0))
+    
+    print("🚀 البوت بدأ بنجاح...")
+    application.run_polling()
 
 if __name__ == '__main__':
-    # ---- Dummy web server for Render ----
-    import threading
-    from http.server import HTTPServer, BaseHTTPRequestHandler
-    
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'Bot is running')
-    
-    def run_server():
-        server = HTTPServer(('0.0.0.0', 10000), Handler)
-        server.serve_forever()
-    
-    threading.Thread(target=run_server, daemon=True).start()
-    # ---- End dummy server ----
-    
-    application.run_polling()
+    Thread(target=run_flask, daemon=True).start()
+    main()
