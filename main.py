@@ -5,7 +5,7 @@ import asyncio
 # import pandas as pd
 # import numpy as np
 from telegram import Update
-from telegram.ext import Application, ...
+from telegram.ext import Application, CommandHandler, ContextTypes
 from datetime import datetime, time as dt_time
 # import pytz
 from flask import Flask
