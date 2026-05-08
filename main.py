@@ -221,5 +221,21 @@ async def run_bot():
     await application.run_polling()
 
 if __name__ == '__main__':
-    keep_alive()  # نشغل Flask
-    asyncio.run(run_bot())
+    # ---- Dummy web server for Render ----
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'Bot is running')
+
+def run_server():
+    server = HTTPServer(('0.0.0.0', 10000), Handler)
+    server.serve_forever()
+
+threading.Thread(target=run_server, daemon=True).start()
+# ---- End dummy server ----
+
+asyncio.run(run_bot())
