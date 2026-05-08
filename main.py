@@ -141,8 +141,9 @@ def cmd_test(message):
     for symbol in PAIRS[:3]:
         name = symbol.replace('=X', '').replace('XAUUSD', 'GOLD')
         try:
-            df = yf.download(symbol, period="2d", interval="1h", progress=False, threads=False)
-            if df.empty or len(df) < 30:
+            144     df = yf.download(symbol, period="2d", interval="1h", progress=False, threads=False)
+145     time.sleep(1)  # زيد هذا السطر الجديد
+146     if df.empty or len(df) < 30:
                 results.append(f"❌ {name}: مافماش داتا")
             else:
                 close = df['Close']
@@ -151,7 +152,8 @@ def cmd_test(message):
                 gain = delta.clip(lower=0).rolling(14).mean()
                 loss = -delta.clip(upper=0).rolling(14).mean()
                 rs = gain / loss
-                rsi = round((100 - (100 / (1 + rs))).iloc[-1], 1)
+                rsi_val = 100 - (100 / (1 + rs))
+rsi = round(rsi_val.iloc[-1], 1)
                 # MACD
                 ema12 = close.ewm(span=12).mean()
                 ema26 = close.ewm(span=26).mean()
