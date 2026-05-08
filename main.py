@@ -1,189 +1,224 @@
-from flask import Flask
-from threading import Thread
 import os
-import telebot
+import time
+import asyncio
 import yfinance as yf
 import pandas as pd
+import numpy as np
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+from datetime import datetime, time as dt_time
 import pytz
-import time
-import sys
-from datetime import datetime
-import schedule
+from flask import Flask
+from threading import Thread
 
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
+TUNISIA_TZ = pytz.timezone('Africa/Tunis')
+
+PAIRS = {
+    "EURUSD": "EURUSD=X",
+    "GBPUSD": "GBPUSD=X",
+    "USDJPY": "USDJPY=X",
+    "EURCHF": "EURCHF=X",
+    "AUDUSD": "AUDUSD=X",
+    "USDCAD": "USDCAD=X",
+    "NZDUSD": "NZDUSD=X",
+    "EURGBP": "EURGBP=X",
+    "USDCHF": "USDCHF=X",
+    "EURJPY": "EURJPY=X"
+}
+
+# Flask باش Render ما يقتلش البوت
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot V3 is alive!"
+    return "بوت الفوركس شغال ✅"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
 
 def keep_alive():
-    def run_flask():
-        app.run(host='0.0.0.0', port=10000)
     t = Thread(target=run_flask)
     t.start()
 
-TOKEN = os.environ.get('TOKEN')
-CHAT_ID = '8513844345'
-bot = telebot.TeleBot(TOKEN)
+def calculate_rsi(prices, period=14):
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
 
-# 1. الأزواج الـ10
-PAIRS = [
-    'EURUSD=X', 'EURCHF=X', 'AUDUSD=X', 'USDJPY=X', 'USDCHF=X',
-    'EURJPY=X', 'CADJPY=X', 'AUDCAD=X', 'EURAUD=X', 'XAUUSD=X'
-]
+def calculate_sma(data, window):
+    return data.rolling(window=window).mean()
 
-def check_signals():
-    print("🔍 Starting 1H scan...")
-    signals_sent = 0
-    for pair in PAIRS:
-        try:
-            name = pair.replace('=X', '').replace('XAUUSD', 'GOLD')
-            print(f"Checking {name} 1H...")
-            data = yf.download(tickers=pair, period="20d", interval="1h", progress=False, threads=False)
-            
-            if data.empty or len(data) < 50:
-                print(f"❌ Not enough data for {name}")
-                time.sleep(3)
-                continue
+def calculate_ema(data, window):
+    return data.ewm(span=window, adjust=False).mean()
 
-            # RSI
-            delta = data["Close"].diff()
-            gain = delta.where(delta > 0, 0).rolling(14).mean()
-            loss = -delta.where(delta < 0, 0).rolling(14).mean()
-            rs = gain / loss
-            data["RSI"] = 100 - (100 / (1 + rs))
-            
-            # MACD
-            exp1 = data["Close"].ewm(span=12, adjust=False).mean()
-            exp2 = data["Close"].ewm(span=26, adjust=False).mean()
-            data["MACD"] = exp1 - exp2
-            data["Signal"] = data["MACD"].ewm(span=9, adjust=False).mean()
-            
-            last = data.iloc[-1]
-            prev = data.iloc[-2]
-            price = round(last["Close"], 5)
-            
-            # ATR للستوب و الهدف
-            data['H-L'] = data['High'] - data['Low']
-            data['H-PC'] = abs(data['High'] - data['Close'].shift(1))
-            data['L-PC'] = abs(data['Low'] - data['Close'].shift(1))
-            data['TR'] = data[['H-L','H-PC','L-PC']].max(axis=1)
-            atr = data['TR'].rolling(14).mean().iloc[-1]
-            sl_distance = round(atr * 1.5, 5)
-            
-            # شروط الشراء: RSI + MACD فقط
-            buy_condition = (
-                last["RSI"] > 50 and 
-                prev["MACD"] < prev["Signal"] and 
-                last["MACD"] > last["Signal"]
-            )
-            
-            # شروط البيع: RSI + MACD فقط
-            sell_condition = (
-                last["RSI"] < 50 and 
-                prev["MACD"] > prev["Signal"] and 
-                last["MACD"] < last["Signal"]
-            )
-            
-            if buy_condition:
-                sl = round(price - sl_distance, 5)
-                tp = round(price + sl_distance * 2, 5)
-                msg = f"🟢 شراء {name}\n⏰ المدة: 20 دقيقة\nالسعر: {price}\nSL: {sl}\nTP: {tp}\nRR: 1:2"
-                bot.send_message(CHAT_ID, msg)
-                print(f"✅ SIGNAL SENT: BUY {name}")
-                signals_sent += 1
-            elif sell_condition:
-                sl = round(price + sl_distance, 5)
-                tp = round(price - sl_distance * 2, 5)
-                msg = f"🔴 بيع {name}\n⏰ المدة: 20 دقيقة\nالسعر: {price}\nSL: {sl}\nTP: {tp}\nRR: 1:2"
-                bot.send_message(CHAT_ID, msg)
-                print(f"✅ SIGNAL SENT: SELL {name}")
-                signals_sent += 1
-            else:
-                print(f"✅ {name} - لا توجد إشارة")
-                
-        except Exception as e:
-            print(f"❌ Error with {pair}: {e}")
-        
-        print("⏳ استراحة 3 ثواني...")
-        time.sleep(3)
+def get_trend(df):
+    if len(df) < 50:
+        return "غير محدد"
+    sma20 = df['SMA20'].iloc[-1]
+    sma50 = df['SMA50'].iloc[-1]
+    close = df['Close'].iloc[-1]
     
-    if signals_sent == 0:
-        print("✅ انتهى الفحص - لا توجد إشارات")
+    if close > sma20 > sma50:
+        return "صاعد 📈"
+    elif close < sma20 < sma50:
+        return "هابط 📉"
     else:
-        print(f"✅ انتهى الفحص - تم إرسال {signals_sent} إشارة")
+        return "عرضي ↔️"
 
-# ========== الأوامر الجديدة ==========
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, f"بوت إشارات 1H V3 خدام 🔥\nالفلاتر: RSI + MACD\nالمدة: 20 دقيقة\nنراقب في: {len(PAIRS)} أزواج\n\n/status = حالة البوت\n/test = فحص فوري")
-
-@bot.message_handler(commands=['status'])
-def cmd_status(message):
-    pairs_txt = '\n'.join([f"• {p.replace('=X','').replace('XAUUSD','GOLD')}" for p in PAIRS])
-    now = datetime.now(pytz.timezone('Africa/Tunis')).strftime('%H:%M:%S %d/%m')
-    msg = f"""🟢 **البوت V3 شغال**
-**الوقت:** {now}
-**الفحص الآلي:** كل ساعة دقيقة 01
-**عدد الأزواج:** {len(PAIRS)}
-**الاستراتيجية:** RSI + MACD
-**الأزواج:**
-{pairs_txt}
-**الحماية:** ✅ UptimeRobot كل 5 دقائق
-✅ Anti Rate-Limit: 3ث بين الأزواج
-جرب /test للفحص اللحظي"""
-    bot.reply_to(message, msg)
-
-@bot.message_handler(commands=['test'])
-def cmd_test(message):
-    bot.reply_to(message, "⏳ فحص لحظي لـ3 أزواج... استنى 15 ثانية")
-    results = []
-    for symbol in PAIRS[:3]:
-        name = symbol.replace('=X', '').replace('XAUUSD', 'GOLD')
-        try:
-            df = yf.download(symbol, period="2d", interval="1h", progress=False, threads=False)
-            time.sleep(1)
-            if df.empty or len(df) < 30:
-                results.append(f"❌ {name}: مافماش داتا")
-            else:
-                close = df['Close']
-                # RSI
-                delta = close.diff()
-                gain = delta.clip(lower=0).rolling(14).mean()
-                loss = -delta.clip(upper=0).rolling(14).mean()
-                rs = gain / loss
-                rsi_val = 100 - (100 / (1 + rs))
-                rsi = round(rsi_val.iloc[-1], 1)
-                # MACD
-                ema12 = close.ewm(span=12).mean()
-                ema26 = close.ewm(span=26).mean()
-                macd = ema12 - ema26
-                signal = macd.ewm(span=9).mean()
-                macd_dir = "صاعد ↑" if macd.iloc[-1] > signal.iloc[-1] else "هابط ↓"
-                results.append(f"📊 {name}\n RSI: {rsi} | MACD: {macd_dir}")
-            time.sleep(3)
-        except Exception as e:
-            results.append(f"❌ {name}: Error")
-    bot.reply_to(message, "🔍 **نتيجة الفحص الفوري:**\n\n" + "\n\n".join(results) + "\n\n_الإشارة تجي كان RSI + MACD تحققو_")
-
-def run_schedule():
-    # يخدم كل ساعة في الدقيقة 01
-    schedule.every().hour.at(":01").do(check_signals)
-    while True:
-        schedule.run_pending()
+def analyze_pair(pair):
+    try:
+        symbol = PAIRS
+        df = yf.download(symbol, period="5d", interval="1h", progress=False, threads=False)
         time.sleep(1)
 
-def start_bot():
-    # شغل الـScheduler في thread منفصل
-    scheduler_thread = Thread(target=run_schedule, daemon=True)
-    scheduler_thread.start()
-    
-    bot.delete_webhook(drop_pending_updates=True)
-    time.sleep(1)
-    print("🤖 Bot V3 is running and scheduler started...")
-    sys.stdout.flush()
-    keep_alive()
-    bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
+        if df.empty or len(df) < 50:
+            return None
 
-if __name__ == "__main__":
-    start_bot()
+        df['RSI'] = calculate_rsi(df['Close'])
+        df['SMA20'] = calculate_sma(df['Close'], 20)
+        df['SMA50'] = calculate_sma(df['Close'], 50)
+        df['EMA9'] = calculate_ema(df['Close'], 9)
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        signal = None
+        reason = ""
+        confidence = ""
+
+        # شروط الشراء القوية
+        if (last['RSI'] < 30 and
+            last['Close'] > last['SMA20'] and
+            prev['Close'] <= prev['SMA20'] and
+            last['Close'] > last['EMA9']):
+            signal = "شراء قوي 🟢🟢"
+            reason = "RSI تشبع بيعي + اختراق SMA20 + فوق EMA9"
+            confidence = "85%"
+
+        # شروط الشراء العادية
+        elif (last['RSI'] < 35 and
+              last['Close'] > last['SMA20'] and
+              prev['Close'] <= prev['SMA20']):
+            signal = "شراء 🟢"
+            reason = "RSI قريب تشبع + اختراق SMA20"
+            confidence = "70%"
+
+        # شروط البيع القوية
+        elif (last['RSI'] > 70 and
+              last['Close'] < last['SMA20'] and
+              prev['Close'] >= prev['SMA20'] and
+              last['Close'] < last['EMA9']):
+            signal = "بيع قوي 🔴🔴"
+            reason = "RSI تشبع شرائي + كسر SMA20 + تحت EMA9"
+            confidence = "85%"
+
+        # شروط البيع العادية
+        elif (last['RSI'] > 65 and
+              last['Close'] < last['SMA20'] and
+              prev['Close'] >= prev['SMA20']):
+            signal = "بيع 🔴"
+            reason = "RSI قريب تشبع + كسر SMA20"
+            confidence = "70%"
+
+        if signal:
+            trend = get_trend(df)
+            now_tunis = datetime.now(TUNISIA_TZ).strftime("%H:%M")
+            msg = f"🚨 إشارة {signal}\n\n"
+            msg += f"الزوج: {pair}\n"
+            msg += f"السعر: {last['Close']:.5f}\n"
+            msg += f"RSI: {last['RSI']:.1f}\n"
+            msg += f"SMA20: {last['SMA20']:.5f}\n"
+            msg += f"الاتجاه: {trend}\n"
+            msg += f"السبب: {reason}\n"
+            msg += f"الثقة: {confidence}\n"
+            msg += f"الوقت: {now_tunis} 🇹🇳"
+            return msg
+        return None
+
+    except Exception as e:
+        print(f"Error analyzing {pair}: {e}")
+        return None
+
+async def send_signals(context: ContextTypes.DEFAULT_TYPE):
+    print(f"Checking signals... {datetime.now(TUNISIA_TZ)}")
+    signals_found = 0
+    for pair in PAIRS.keys():
+        try:
+            msg = analyze_pair(pair)
+            if msg:
+                await context.bot.send_message(chat_id=CHAT_ID, text=msg)
+                signals_found += 1
+                await asyncio.sleep(5)
+        except Exception as e:
+            print(f"Error sending {pair}: {e}")
+    
+    if signals_found == 0:
+        print("No signals this hour")
+
+async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔍 فحص لحظي لـ3 أزواج... استنى 15 ثانية ⏳")
+    test_pairs = ["EURUSD", "EURCHF", "AUDUSD"]
+    results = []
+    
+    for pair in test_pairs:
+        try:
+            result = analyze_pair(pair)
+            if result:
+                results.append(result)
+            else:
+                symbol = PAIRS
+                df = yf.download(symbol, period="2d", interval="1h", progress=False, threads=False)
+                time.sleep(1)
+                if not df.empty and len(df) > 14:
+                    df['RSI'] = calculate_rsi(df['Close'])
+                    rsi = df['RSI'].iloc[-1]
+                    close = df['Close'].iloc[-1]
+                    results.append(f"⚪ {pair}\nالسعر: {close:.5f}\nRSI: {rsi:.1f} - لا توجد إشارة حاليا")
+                else:
+                    results.append(f"❌ {pair}: مافماش داتا كافية")
+        except Exception as e:
+            results.append(f"❌ {pair}: Error {str(e)[:30]}")
+        await asyncio.sleep(5)
+
+    final_msg = "📊 نتيجة الفحص الفوري:\n\n" + "\n\n".join(results)
+    await update.message.reply_text(final_msg)
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    welcome_msg = "🤖 بوت الفوركس شغال 24/7 ✅\n\n"
+    welcome_msg += "📈 الأزواج: 10\n"
+    welcome_msg += "⏰ الإشارات: كل ساعة\n"
+    welcome_msg += "📊 الملخص اليومي: 22:00 🇹🇳\n\n"
+    welcome_msg += "الأوامر:\n"
+    welcome_msg += "/test - فحص فوري\n"
+    welcome_msg += "/start - هذه الرسالة"
+    await update.message.reply_text(welcome_msg)
+
+async def daily_summary(context: ContextTypes.DEFAULT_TYPE):
+    now_tunis = datetime.now(TUNISIA_TZ).strftime("%Y-%m-%d")
+    summary = f"📊 ملخص يومي {now_tunis} 🇹🇳\n\n"
+    summary += "✅ البوت شغال طبيعي\n"
+    summary += "📈 يراقب 10 أزواج\n"
+    summary += "⏰ فحص كل ساعة\n\n"
+    summary += "غدوة يوم جديد و فرص جديدة 💪"
+    await context.bot.send_message(chat_id=CHAT_ID, text=summary)
+
+async def run_bot():
+    application = Application.builder().token(TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("test", test_command))
+
+    job_queue = application.job_queue
+    job_queue.run_repeating(send_signals, interval=3600, first=10)
+    job_queue.run_daily(daily_summary, time=dt_time(hour=22, minute=0, tzinfo=TUNISIA_TZ))
+
+    print("Bot started successfully...")
+    await application.run_polling()
+
+if __name__ == '__main__':
+    keep_alive()  # نشغل Flask
+    asyncio.run(run_bot())
