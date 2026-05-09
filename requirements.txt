@@ -1,7 +1,8 @@
-setuptools==68.2.2
+setuptools==70.3.0
 wheel
-Flask==2.3.3
-pandas==2.2
-requests==2.31.0
+numpy==1.26.4
+pandas==2.2.2
+Flask==3.0.3
+requests==2.32.3
 yfinance==0.2.40
 schedule==1.2.1
