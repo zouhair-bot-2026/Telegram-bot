@@ -1,39 +1,43 @@
 import requests
+import os
 import schedule
 import time
-import os
-import threading
 from flask import Flask
+from threading import Thread
 from datetime import datetime
+import pytz
 
 app = Flask(__name__)
 
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.environ.get('CHAT_ID')
-
 def send_telegram_message():
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    message = f"✅ البوت خدام تمام\nالتوقيت: {now}\nمن Render Python 3.14"
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
+    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    chat_id = os.environ.get('CHAT_ID')
+    tunis_tz = pytz.timezone('Africa/Tunis')
+    now = datetime.now(tunis_tz).strftime("%Y-%m-%d %H:%M:%S")
+    message = f"تم الارسال: {now}"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message}
     try:
-        requests.post(url, json=payload, timeout=10)
-        print("تم الارسال:", now)
+        requests.post(url, json=payload)
+        print(message)  # باش يطلع في الـ Logs
     except Exception as e:
-        print("فشل الارسال:", e)
+        print(f"خطأ في الارسال: {e}")
 
 def run_schedule():
-    schedule.every(1).hours.do(send_telegram_message)
-    send_telegram_message()  # يبعث أول رسالة كي يخدم
+    # ابعث رسالة فورية أول ما يخدم
+    send_telegram_message()
+    # بعدها ابعث كل دقيقة
+    schedule.every(1).minutes.do(send_telegram_message)
     while True:
         schedule.run_pending()
-        time.sleep(60)
+        time.sleep(1)
 
 @app.route('/')
 def home():
-    return "Bot is alive!"
+    return "Telegram Bot is Running"
 
 if __name__ == "__main__":
-    threading.Thread(target=run_schedule, daemon=True).start()
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    # شغل الـ schedule في thread منفصل
+    Thread(target=run_schedule).start()
+    # شغل Flask باش Render ما يقتلش البوت
+    app.run(host='0.0.0.0', port=10000)
