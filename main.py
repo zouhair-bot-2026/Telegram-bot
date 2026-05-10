@@ -1,32 +1,29 @@
-import requests
 import os
+import requests
 import schedule
 import time
-from flask import Flask
-from threading import Thread
 from datetime import datetime
+from threading import Thread
+from flask import Flask
 import pytz
 
 app = Flask(__name__)
 
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+TZ = pytz.timezone('Africa/Tunis')
+
 def send_telegram_message():
-    token = os.environ.get('TELEGRAM_BOT_TOKEN')
-    chat_id = os.environ.get('CHAT_ID')
-    tunis_tz = pytz.timezone('Africa/Tunis')
-    now = datetime.now(tunis_tz).strftime("%Y-%m-%d %H:%M:%S")
-    message = f"تم الارسال: {now}"
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message}
     try:
-        requests.post(url, json=payload)
-        print(message)  # باش يطلع في الـ Logs
+        now = datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')
+        url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+        data = {'chat_id': TELEGRAM_CHAT_ID, 'text': f'تم الارسال: {now}'}
+        requests.post(url, data=data, timeout=10)
+        print(f'تم الارسال: {now}')
     except Exception as e:
-        print(f"خطأ في الارسال: {e}")
+        print(f'خطأ: {e}')
 
 def run_schedule():
-    # ابعث رسالة فورية أول ما يخدم
-    send_telegram_message()
-    # بعدها ابعث كل دقيقة
     schedule.every(1).minutes.do(send_telegram_message)
     while True:
         schedule.run_pending()
@@ -34,10 +31,17 @@ def run_schedule():
 
 @app.route('/')
 def home():
-    return "Telegram Bot is Running"
+    return 'Bot is running'
+
+# هذا يشتغل مع gunicorn
+thread_started = False
+@app.before_request
+def start_thread():
+    global thread_started
+    if not thread_started:
+        Thread(target=run_schedule, daemon=True).start()
+        send_telegram_message() # اول رسالة
+        thread_started = True
 
 if __name__ == "__main__":
-    # شغل الـ schedule في thread منفصل
-    Thread(target=run_schedule).start()
-    # شغل Flask باش Render ما يقتلش البوت
     app.run(host='0.0.0.0', port=10000)
